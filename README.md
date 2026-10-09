@@ -1,5 +1,5 @@
 # What does this script do?
-The present script performs automated EEG preprocessing for single-trial ERP analyses. The dataset for which this script was designed contained eventcodes already, so there is no insertEventcodes step. If you have a dataset without eventcodes, make sure to insert them before running this script.
+This script performs automated EEG preprocessing for single-trial ERP analyses. The dataset for which this script was designed contained eventcodes already, so there is no insertEventcodes step. If you have a dataset without eventcodes, make sure to insert them before running this script.
 
 # Order of operations 
 
