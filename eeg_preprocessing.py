@@ -1,32 +1,21 @@
 """
 ========================================================================
- Single-subject ERP pipeline — from raw BDF, CORRECT event handling
+ Single-subject ERP pipeline — from raw BDF to single-trial ERPs 
+ Author: Ryan Henderson, with help from Claude
 ========================================================================
 
-Why this version exists: the resume-from-downsampled version hand-rescaled the
-event sample indices (assuming 2048 Hz) and cached them. Your BDF is actually
-4096 Hz, so the rescale was wrong and events landed ~8x past the end of the
-data -> nearly every epoch dropped as TOO_SHORT.
+Memory note: depending on the size of your EEG file (I'm running a BioSemi 
+system so this is a BDF for me), reading the BDF can be taxing on your system
+memory (aka RAM). Run this script either on a computer with 16+ GB, or on a cluster.
+After unpacking the raw data, we resample immediately, shrinking everything.
 
-The fix is to never do the rescaling by hand. We read the BDF, find events at
-whatever the true rate is, and let raw.resample(events=events) rescale the data
-and the events TOGETHER. That keeps them in one timebase by construction. The
-51 ms stimulus-onset correction is then applied once, in the final 512 Hz clock.
-
-Memory note: reading the BDF is the only heavy moment (a big file unpacks to
-tens of GB of float64). We resample immediately after, shrinking everything.
-Run it in your 64 GB SCC session.
-
-Two features carried over:
-  * PLOT DIALS  — STEPS_TO_PLOT chooses which VOT steps appear in the figure.
-  * ONSET SHIFT — STIM_DELAY_MS moves markers onto true sound onset (see note).
 """
 
 import os
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")      # headless backend: save PDFs on the SCC, no display
+matplotlib.use("Agg")      # Use this settingt to save PDFs on a headless system
 import matplotlib.pyplot as plt
 import mne
 
@@ -34,37 +23,36 @@ import mne
 #  PARAMETERS
 # ======================================================================
 
-# ---- Files & folders -------------------------------------------------
-BDF_PATH   = "/projectnb/perlab/mrx/eeg_pilot/s14.bdf"
-OUT_ROOT   = "/projectnb/perlab/mrx/eeg_pilot"
-SUBJECT_ID = "s14"
+# ---- Files & folders - set these -------------------------------------------------
+BDF_PATH   = ""
+OUT_ROOT   = ""
+SUBJECT_ID = ""
 
 # ---- Trigger / events ------------------------------------------------
+# NOTE: Make sure to adapt these to your system's settings if you have a BioSemi
 STIM_CHANNEL = "Status"
 EVENT_MASK   = 0xFF        # strips BioSemi's 31744 offset (31845 -> 101, etc.)
 EVENT_ID     = {f"step{n}": 100 + n for n in range(1, 10)}   # step1->101 … step9->109
 
 # ---- Downsampling ----------------------------------------------------
-NEW_SFREQ = 512            # Hz. The original rate is read from the file, so no
-                           # assumption is baked in (your file is ~4096 Hz, an
-                           # 8x reduction — still far above what 30 Hz ERPs need).
+NEW_SFREQ = 512            # Hz. The original rate is read from the file. We
+                           # will use 512 Hz since that is overkill for 30 Hz ERPs. 
 
 # ---- Stimulus-onset timing correction (READ THIS) --------------------
 # The trigger marks when the audio FILE started. The sound arrives 51 ms later:
 # 50 ms of leading silence in the file + ~1 ms down the Etymotic tubes. To put
-# epoch t=0 on TRUE sound onset, each marker moves 51 ms LATER in the recording
-# (higher sample index). Pushing the marker forward is what makes every ERP
-# component appear 51 ms EARLIER in latency — zero now sits where the sound
-# began, not where the file started.
+# epoch t=0 on TRUE sound onset, each marker moves 51 ms LATER in the recording.
+# Zero now sits where the sound began, not where the file started.
 #
-# SIGN: POSITIVE = sound arrives AFTER the trigger (your case). Applied in the
-# 512 Hz timebase, so 51 ms -> round(0.051 * 512) = 26 samples = 50.78 ms
-# (one sample is 1.95 ms at 512 Hz; the 0.2 ms rounding is negligible).
+# SIGN: POSITIVE = sound arrives AFTER the trigger in most cases. Applied in the
+# 512 Hz timebase, so 51 ms -> round(0.051 * 512) = 26 samples = 50.78 ms. Redo this
+# calculation if you use a different trigger box setup/different onset latency.
+
 STIM_DELAY_MS = 51.0
 
 # ---- Plot dials ------------------------------------------------------
-STEPS_TO_PLOT = [3, 4, 5, 6, 7]   # which VOT steps (1–9) go in the ERP figure
-PLOT_COMBINE  = "mean"            # collapse F3/Fz/F4 into one trace per step;
+STEPS_TO_PLOT = [1, 2, 3, 4, 5, 6, 7]   # which VOT steps (1–9) go in the ERP figure
+PLOT_COMBINE  = "mean"            # average F3/Fz/F4 into one trace per step;
                                   # set to None for one panel per channel
 
 # ---- Channel removal -------------------------------------------------
@@ -81,11 +69,7 @@ H_FREQ = 30.0
 MONTAGE = "biosemi32"
 
 # ---- Artifact rejection (peak-to-peak, per channel type) -------------
-# NOTE: you set all four eye-proxy channels to the strict 75 µV threshold.
-# Now that the TOO_SHORT bug is gone and real amplitude rejection actually
-# runs, re-check the drop log (epochs.plot_drop_log()). If F7/F8 dominate the
-# drops, they're catching temporalis muscle at a blink-tight threshold — move
-# them out of EOG_CHANNELS so they fall back to the 150 µV EEG limit.
+# If you recorded from external canthus EEG sensors, use them instead
 VEOG_CHANNELS = ["Fp1", "Fp2"]    # vertical EOG proxy (blinks)
 HEOG_CHANNELS = ["F7", "F8"]      # horizontal EOG proxy (saccades)
 EOG_CHANNELS  = VEOG_CHANNELS + HEOG_CHANNELS
@@ -95,21 +79,22 @@ EEG_REJECT_UV = 150               # µV -> every other scalp channel
 # ---- Epoching --------------------------------------------------------
 TMIN     = -0.200
 TMAX     =  0.300
-BASELINE = (-0.198, 0)            # truly pre-sound-onset, after the shift
+BASELINE = (-0.198, 0)            # Set the baseline for displaying ERP 
 
 # ---- Amplitude measurement (window is relative to corrected onset) ---
-MEAS_CHANNELS = ["F3", "Fz", "F4"]
-MEAS_TMIN = 0.150                 # s (150 ms post sound onset)
+MEAS_CHANNELS = ["F3", "Fz", "F4"] # Alter to your electrodes of interest
+# Set this amplitude to capture the ERP component of your choice
+MEAS_TMIN = 0.150                 # s (150 ms post sound onset) 
 MEAS_TMAX = 0.180                 # s (180 ms post sound onset)
 CSV_PATH  = os.path.join(OUT_ROOT, f"{SUBJECT_ID}_amplitudes.csv")
 
-# Canonical event file (512 Hz timebase, UNSHIFTED triggers) for any future
-# resume script — so nobody has to hand-rescale again.
+# Output rescaled events file for trasnparency/to save rescaling computation
+# for future script runs
 EVENTS_PATH = os.path.join(OUT_ROOT, "downsampled", f"{SUBJECT_ID}-eve.fif")
 
 
 # ======================================================================
-#  Helper
+#  Save file helper
 # ======================================================================
 def step_path(folder, filename):
     """Create OUT_ROOT/folder/ (like `mkdir -p`) and return the path to filename."""
@@ -119,20 +104,19 @@ def step_path(folder, filename):
 
 
 # ======================================================================
-#  STEP 1 — Read BDF, find events at TRUE rate, resample data+events together
+#  STEP 1 — Read BDF, find events at original rate, resample data+events together
 # ======================================================================
 raw = mne.io.read_raw_bdf(BDF_PATH, preload=True)
 print(f"BDF sample rate read from file: {raw.info['sfreq']:.0f} Hz")
 
-# Sharp, full-rate trigger detection. The mask strips the high bits so codes
-# come back as 101..109 (and 14/15, which EVENT_ID ignores).
+# Extract triggers, stripping the high bits so codes come back as 101..109 (and 
+# 14/15, which EVENT_ID ignores).
 events = mne.find_events(raw, stim_channel=STIM_CHANNEL,
                          mask=EVENT_MASK, mask_type="and")
 print(f"Found {len(events)} events at full rate.")
 
-# THE KEY LINE: resample data and events in lockstep. MNE reads the true source
-# rate from the object and rescales the event samples to match NEW_SFREQ — no
-# hand arithmetic, no timebase mismatch, no TOO_SHORT.
+# Resample data and events simultaneously. MNE reads the true source rate from the 
+# object and rescales the event samples to match NEW_SFREQ.
 raw, events = raw.resample(NEW_SFREQ, events=events)
 
 # Save the downsampled raw and the canonical (unshifted) events, now correctly
@@ -158,7 +142,7 @@ print(f"Samples the last epoch needs beyond the data end: {need_past_end} "
 
 
 # ======================================================================
-#  STEP 2 — Remove channels
+#  STEP 2 — Remove unused channels
 # ======================================================================
 if CHANS_TO_DROP:
     raw.drop_channels(CHANS_TO_DROP)
@@ -167,7 +151,8 @@ raw.save(step_path("channels_removed", f"{SUBJECT_ID}_chdrop_raw.fif"),
 
 
 # ======================================================================
-#  STEP 3 — Re-reference to channels 33 & 34 (linked mastoids)
+#  STEP 3 — Re-reference to channels 33 & 34 (L/R mastoids - change if 
+#  you use a different reference)
 # ======================================================================
 raw.set_eeg_reference(ref_channels=REF_CHANNELS)
 raw.set_channel_types({ch: "misc" for ch in REF_CHANNELS})   # keep out of EEG set
@@ -191,11 +176,11 @@ raw.set_montage(montage, on_missing="ignore")
 
 
 # ======================================================================
-#  STEPS 6–8 — Epoch, with artifact rejection built in
+#  STEPS 6–8 — Epoch and peak-to-peak artifact rejection 
 # ======================================================================
 raw.set_channel_types({ch: "eog" for ch in EOG_CHANNELS})
 
-reject = {"eog": EOG_REJECT_UV * 1e-6,     # peak-to-peak, µV -> V
+reject = {"eog": EOG_REJECT_UV * 1e-6,     # µV -> V
           "eeg": EEG_REJECT_UV * 1e-6}
 
 epochs = mne.Epochs(raw, events, event_id=EVENT_ID,
@@ -204,14 +189,14 @@ epochs = mne.Epochs(raw, events, event_id=EVENT_ID,
 
 epochs.save(step_path("epoched", f"{SUBJECT_ID}_epo.fif"), overwrite=True)
 
-# Report retained vs. found so you can see rejection at a glance.
+# Report rejections as retained trials vs found trials
 print(f"Epochs retained: {len(epochs)} / {len(events)} "
       f"({len(events) - len(epochs)} dropped).")
 
 
-# ======================================================================
-#  STEP 9 — Mean amplitude at F3/Fz/F4, 150–180 ms -> long-format CSV
-# ======================================================================
+# =================================================================================
+#  STEP 9 — Mean amplitude at F3/Fz/F4, 150–180 ms, single-trial -> long-format CSV
+# =================================================================================
 rows = []
 for cond_name in EVENT_ID:
     ep = epochs[cond_name]
@@ -230,7 +215,7 @@ for cond_name in EVENT_ID:
                 "Channel":       ch_name,
                 "Trial":         trial_i + 1,
                 "MeanAmplitude": mean_amp[trial_i, ch_i],
-                "WindowMs":      f"{int(MEAS_TMIN*1000)}-{int(MEAS_TMAX*1000)}",
+                "WindowMs":      f"{int(MEAS_TMIN*1000)}-{int(MEAS_TMAX*1000)}", # convert from secs -> ms
             })
 
 amp_df = pd.DataFrame(rows)
@@ -243,7 +228,7 @@ counts.to_csv(os.path.join(OUT_ROOT, f"{SUBJECT_ID}_trials_per_step.csv"),
 
 
 # ======================================================================
-#  STEP 10 — Average ALL steps into ERPs; PLOT only the dialed-in steps
+#  STEP 10 — Average ALL steps into ERPs; PLOT only STEPS_TO_PLOT
 # ======================================================================
 evokeds = {}
 for cond in EVENT_ID:
