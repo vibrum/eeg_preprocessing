@@ -125,10 +125,7 @@ raw.save(step_path("downsampled", f"{SUBJECT_ID}_downsampled_raw.fif"),
          overwrite=True)
 mne.write_events(EVENTS_PATH, events, overwrite=True)   # UNSHIFTED triggers, 512 Hz timebase
 
-
-# ======================================================================
 #  Timing correction — move markers onto true sound onset (in 512 Hz clock)
-# ======================================================================
 shift_samples = int(round(STIM_DELAY_MS / 1000.0 * raw.info["sfreq"]))
 events[:, 0] += shift_samples           # + = later (toward true sound onset)
 print(f"Shifted events by {shift_samples} samples "
