@@ -1,3 +1,10 @@
+# Requirements
+
+    pip install -r requirements.txt
+
+Tested on Linux-4.18.0, Python 3.13.5, MNE 1.10.0, NumPy 2.2.6,
+pandas 3.0.5, Matplotlib 3.10.3 (backend=Agg).
+
 # What does this script do?
 This script performs automated EEG preprocessing for single-trial ERP analyses. The dataset for which this script was designed contained eventcodes already, so there is no insertEventcodes step. If you have a dataset without eventcodes, make sure to insert them before running this script.
 
