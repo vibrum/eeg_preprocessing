@@ -26,4 +26,4 @@ In order, the analysis is the following:
 After following this procedure, your ERPs should look resemble the following image (note: mne.viz.plot 
 figures look different, but the general shape should be the same, if you are looking at N100 data).
 
-![](docs/example_erps.png)
+![](example_erps.png)
