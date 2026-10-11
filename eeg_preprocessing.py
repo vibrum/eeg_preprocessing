@@ -12,11 +12,9 @@ After unpacking the raw data, we resample immediately, shrinking everything.
 """
 
 import os
-import numpy as np
 import pandas as pd
 import matplotlib
 matplotlib.use("Agg")      # Use this setting to save PDFs on a headless system
-import matplotlib.pyplot as plt
 import mne
 
 # ======================================================================
