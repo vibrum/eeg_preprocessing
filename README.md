@@ -21,3 +21,9 @@ In order, the analysis is the following:
 8) Artifact Rejection - reject trials that are contaminated by blinks and/or muscle movements.
 9) Output average EEG amplitude on each trial over the chosen latency.
 10) Create averaged ERPs, collapsing across trials, and output a test figure for quality control.
+
+# End product
+After following this procedure, your ERPs should look resemble the following image (note: mne.viz.plot 
+figures look different, but the general shape should be the same, if you are looking at N100 data).
+
+![](docs/example_erps.png)
