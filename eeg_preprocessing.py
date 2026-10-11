@@ -15,7 +15,7 @@ import os
 import numpy as np
 import pandas as pd
 import matplotlib
-matplotlib.use("Agg")      # Use this settingt to save PDFs on a headless system
+matplotlib.use("Agg")      # Use this setting to save PDFs on a headless system
 import matplotlib.pyplot as plt
 import mne
 
@@ -88,7 +88,7 @@ MEAS_TMIN = 0.150                 # s (150 ms post sound onset)
 MEAS_TMAX = 0.180                 # s (180 ms post sound onset)
 CSV_PATH  = os.path.join(OUT_ROOT, f"{SUBJECT_ID}_amplitudes.csv")
 
-# Output rescaled events file for trasnparency/to save rescaling computation
+# Output rescaled events file for transparency/to save rescaling computation
 # for future script runs
 EVENTS_PATH = os.path.join(OUT_ROOT, "downsampled", f"{SUBJECT_ID}-eve.fif")
 
